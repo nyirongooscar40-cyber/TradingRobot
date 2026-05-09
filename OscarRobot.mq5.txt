@@ -1,0 +1,111 @@
+//+------------------------------------------------------------------+
+//| MateEditor MT5 Spike Robot                                      |
+//+------------------------------------------------------------------+
+#property strict
+
+input double LotSize = 1.0;
+input int MaxTradesPerSignal = 4;
+input int AvgPeriod = 4;
+input double SpikeMultiplier = 3.0;
+input int MaxTakeProfitPointsPerSignal = 4;
+
+int tradesThisSignal = 0;
+datetime lastSpikeTime = 0;
+
+//+------------------------------------------------------------------+
+//| Check for spike                                                  |
+//+------------------------------------------------------------------+
+bool IsSpike()
+{
+   double currentRange = iHigh(_Symbol, PERIOD_M1, 1) - iLow(_Symbol, PERIOD_M1, 1);
+
+   double avgRange = 0;
+   for(int i = 2; i < AvgPeriod + 2; i++)
+   {
+      avgRange += (iHigh(_Symbol, PERIOD_M1, i) - iLow(_Symbol, PERIOD_M1, i));
+   }
+
+   avgRange /= AvgPeriod;
+
+   if(currentRange > avgRange * SpikeMultiplier)
+      return true;
+
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Detect symbol type                                               |
+//+------------------------------------------------------------------+
+bool IsBoom()
+{
+   return (StringFind(_Symbol, "Boom") >= 0);
+}
+
+bool IsCrash()
+{
+   return (StringFind(_Symbol, "Crash") >= 0);
+}
+
+//+------------------------------------------------------------------+
+//| Execute trade                                                    |
+//+------------------------------------------------------------------+
+void ExecuteTrade()
+{
+   if(tradesThisSignal >= MaxTradesPerSignal)
+      return;
+
+   double price;
+   int type;
+
+   if(IsBoom()) // SELL on Boom
+   {
+      price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      type = ORDER_TYPE_SELL;
+   }
+   else if(IsCrash()) // BUY on Crash
+   {
+      price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+      type = ORDER_TYPE_BUY;
+   }
+   else
+      return;
+
+   MqlTradeRequest request;
+   MqlTradeResult result;
+
+   ZeroMemory(request);
+   ZeroMemory(result);
+
+   request.action = TRADE_ACTION_DEAL;
+   request.symbol = _Symbol;
+   request.volume = LotSize;
+   request.type = type;
+   request.price = price;
+   request.deviation = 10;
+   request.magic = 123456;
+
+   OrderSend(request, result);
+
+   if(result.retcode == TRADE_RETCODE_DONE)
+      tradesThisSignal++;
+}
+
+//+------------------------------------------------------------------+
+//| OnTick                                                           |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+   if(IsSpike())
+   {
+      datetime spikeTime = iTime(_Symbol, PERIOD_M1, 1);
+
+      // New spike detected
+      if(spikeTime != lastSpikeTime)
+      {
+         tradesThisSignal = 0;
+         lastSpikeTime = spikeTime;
+      }
+
+      ExecuteTrade();
+   }
+}
